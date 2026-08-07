@@ -1344,6 +1344,28 @@ struct ContentView: View {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var recorder: MeetingRecorder?
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier,
+              let running = NSRunningApplication
+                .runningApplications(withBundleIdentifier: bundleIdentifier)
+                .first(where: {
+                    $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
+                }) else { return }
+
+        running.activate(options: [.activateAllWindows])
+        NSApp.terminate(nil)
+    }
+
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication,
+        hasVisibleWindows flag: Bool
+    ) -> Bool {
+        if !flag {
+            sender.windows.first?.makeKeyAndOrderFront(nil)
+        }
+        return true
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let recorder, recorder.isRecording else { return .terminateNow }
         guard !recorder.isBusy else { return .terminateCancel }
