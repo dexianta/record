@@ -52,7 +52,7 @@ for (name, size) in files {
     ).fill()
 
     let dotSide = side * 0.34
-    NSColor(calibratedRed: 1, green: 0.23, blue: 0.19, alpha: 1).setFill()
+    NSColor(calibratedRed: 0.69, green: 0, blue: 0, alpha: 1).setFill()
     NSBezierPath(
         ovalIn: NSRect(
             x: (side - dotSide) / 2,
