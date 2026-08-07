@@ -6,6 +6,8 @@
     <string>Record</string>
     <key>CFBundleExecutable</key>
     <string>Record</string>
+    <key>CFBundleIconFile</key>
+    <string>Record.icns</string>
     <key>CFBundleIdentifier</key>
     <string>com.local.MeetingAudio</string>
     <key>CFBundleInfoDictionaryVersion</key>

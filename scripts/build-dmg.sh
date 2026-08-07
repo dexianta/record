@@ -11,6 +11,7 @@ DMG_PATH="$DIST_DIR/record.dmg"
 LEGACY_APP_PATH="$DIST_DIR/Meeting Audio.app"
 LEGACY_DMG_PATH="$DIST_DIR/MeetingAudio-0.1.0-arm64.dmg"
 BUILD_DIR="$PROJECT_DIR/.build"
+ICONSET_PATH="$BUILD_DIR/$APP_NAME.iconset"
 
 export SWIFTPM_MODULECACHE_OVERRIDE="$BUILD_DIR/ModuleCache"
 export CLANG_MODULE_CACHE_PATH="$BUILD_DIR/ModuleCache"
@@ -23,10 +24,12 @@ test -x "$BIN_DIR/$EXECUTABLE_NAME"
 "$BIN_DIR/$EXECUTABLE_NAME" --self-check
 plutil -lint "$PROJECT_DIR/Packaging/Info.plist"
 
-rm -rf -- "$APP_PATH" "$LEGACY_APP_PATH"
-mkdir -p "$APP_PATH/Contents/MacOS"
+rm -rf -- "$APP_PATH" "$LEGACY_APP_PATH" "$ICONSET_PATH"
+mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
 install -m 755 "$BIN_DIR/$EXECUTABLE_NAME" "$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME"
 install -m 644 "$PROJECT_DIR/Packaging/Info.plist" "$APP_PATH/Contents/Info.plist"
+swift "$PROJECT_DIR/scripts/generate-icon.swift" "$ICONSET_PATH"
+iconutil -c icns "$ICONSET_PATH" -o "$APP_PATH/Contents/Resources/Record.icns"
 
 codesign --force --sign - "$APP_PATH"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
