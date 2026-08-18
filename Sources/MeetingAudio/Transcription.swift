@@ -91,6 +91,36 @@ enum TranscriptionError: LocalizedError {
     }
 }
 
+final class TranscriptionControl: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    private let progressHandler: @Sendable (Double) -> Void
+
+    init(progressHandler: @escaping @Sendable (Double) -> Void = { _ in }) {
+        self.progressHandler = progressHandler
+    }
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func cancel() {
+        lock.lock()
+        value = true
+        lock.unlock()
+    }
+
+    func checkCancellation() throws {
+        if isCancelled { throw CancellationError() }
+    }
+
+    func reportProgress(_ percent: Int32) {
+        progressHandler(min(max(Double(percent) / 100, 0), 1))
+    }
+}
+
 private final class ModelDownload: NSObject, URLSessionDownloadDelegate {
     private let destinationURL: URL
     private let progressHandler: (Double) -> Void
@@ -170,9 +200,16 @@ private final class ModelDownload: NSObject, URLSessionDownloadDelegate {
 }
 
 enum LocalWhisper {
-    static func transcribe(audioURL: URL, modelURL: URL, language: String) async throws -> String {
-        let samples = try await pcmSamples(from: audioURL)
+    static func transcribe(
+        audioURL: URL,
+        modelURL: URL,
+        language: String,
+        control: TranscriptionControl? = nil
+    ) async throws -> String {
+        try control?.checkCancellation()
+        let samples = try await pcmSamples(from: audioURL, control: control)
         guard samples.count <= Int(Int32.max) else { throw TranscriptionError.audioTooLong }
+        try control?.checkCancellation()
 
         var contextParameters = whisper_context_default_params()
         contextParameters.use_gpu = true
@@ -190,6 +227,28 @@ enum LocalWhisper {
         parameters.print_realtime = false
         parameters.print_timestamps = false
         parameters.no_timestamps = true
+        if let control {
+            parameters.abort_callback = { pointer in
+                guard let pointer else { return false }
+                return Unmanaged<TranscriptionControl>
+                    .fromOpaque(pointer)
+                    .takeUnretainedValue()
+                    .isCancelled
+            }
+            parameters.abort_callback_user_data = Unmanaged
+                .passUnretained(control)
+                .toOpaque()
+            parameters.progress_callback = { _, _, progress, pointer in
+                guard let pointer else { return }
+                Unmanaged<TranscriptionControl>
+                    .fromOpaque(pointer)
+                    .takeUnretainedValue()
+                    .reportProgress(progress)
+            }
+            parameters.progress_callback_user_data = Unmanaged
+                .passUnretained(control)
+                .toOpaque()
+        }
 
         let result = language.withCString { languagePointer in
             parameters.language = languagePointer
@@ -197,6 +256,7 @@ enum LocalWhisper {
                 whisper_full(context, parameters, $0.baseAddress, Int32($0.count))
             }
         }
+        try control?.checkCancellation()
         guard result == 0 else { throw TranscriptionError.transcriptionFailed }
 
         let segmentCount = whisper_full_n_segments(context)
@@ -210,7 +270,11 @@ enum LocalWhisper {
         return transcript + "\n"
     }
 
-    static func pcmSamples(from audioURL: URL) async throws -> [Float] {
+    static func pcmSamples(
+        from audioURL: URL,
+        control: TranscriptionControl? = nil
+    ) async throws -> [Float] {
+        try control?.checkCancellation()
         let asset = AVURLAsset(url: audioURL)
         let tracks = try await asset.loadTracks(withMediaType: .audio)
         guard let track = tracks.first else {
@@ -246,6 +310,12 @@ enum LocalWhisper {
             samples.reserveCapacity(Int(duration.seconds * 16_000))
         }
         while let sampleBuffer = output.copyNextSampleBuffer() {
+            do {
+                try control?.checkCancellation()
+            } catch {
+                reader.cancelReading()
+                throw error
+            }
             guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { continue }
             let byteCount = CMBlockBufferGetDataLength(blockBuffer)
             guard byteCount > 0, byteCount.isMultiple(of: MemoryLayout<Float>.size) else {
@@ -287,6 +357,8 @@ final class LocalTranscription: ObservableObject {
     @Published private(set) var isDownloading = false
     @Published private(set) var downloadProgress = 0.0
     @Published private(set) var isTranscribing = false
+    @Published private(set) var isCancellingTranscription = false
+    @Published private(set) var transcriptionProgress = 0.0
     @Published private(set) var status = "Local transcription is not set up."
     @Published private(set) var lastOutputURL: URL?
     @Published var selectedLanguageCode: String {
@@ -302,6 +374,7 @@ final class LocalTranscription: ObservableObject {
     let languages = TranscriptionLanguage.available
     let models = WhisperModel.available
     private var downloader: ModelDownload?
+    private var transcriptionControl: TranscriptionControl?
 
     var selectedModel: WhisperModel {
         models.first { $0.id == selectedModelID }
@@ -399,7 +472,15 @@ final class LocalTranscription: ObservableObject {
 
     func transcribe(_ audioURL: URL) async {
         guard isReady, !isTranscribing else { return }
+        let control = TranscriptionControl { [weak self] progress in
+            Task { @MainActor [weak self] in
+                self?.transcriptionProgress = progress
+            }
+        }
+        transcriptionControl = control
         isTranscribing = true
+        isCancellingTranscription = false
+        transcriptionProgress = 0
         lastOutputURL = nil
         status = "Preparing \(audioURL.lastPathComponent)…"
         do {
@@ -410,17 +491,31 @@ final class LocalTranscription: ObservableObject {
                 try await LocalWhisper.transcribe(
                     audioURL: audioURL,
                     modelURL: modelURL,
-                    language: language
+                    language: language,
+                    control: control
                 )
             }.value
+            try control.checkCancellation()
             let outputURL = sidecarTranscriptURL(for: audioURL)
             try transcript.write(to: outputURL, atomically: true, encoding: .utf8)
+            transcriptionProgress = 1
             lastOutputURL = outputURL
             status = "Saved \(outputURL.lastPathComponent)"
+        } catch is CancellationError {
+            status = "Transcription cancelled."
         } catch {
             status = "Transcription failed: \(error.localizedDescription)"
         }
+        transcriptionControl = nil
         isTranscribing = false
+        isCancellingTranscription = false
+    }
+
+    func cancelTranscription() {
+        guard isTranscribing, !isCancellingTranscription else { return }
+        isCancellingTranscription = true
+        status = "Cancelling transcription…"
+        transcriptionControl?.cancel()
     }
 
     func revealTranscript() {
@@ -471,37 +566,30 @@ final class LocalTranscription: ObservableObject {
 
 struct TranscriptionView: View {
     @ObservedObject var transcription: LocalTranscription
-    let audioURL: URL?
-    let completion: (() -> Void)?
-    @Environment(\.dismiss) private var dismiss
+    let audioURL: URL
+    let onBack: () -> Void
     @State private var confirmsRemoval = false
-
-    init(
-        transcription: LocalTranscription,
-        audioURL: URL? = nil,
-        completion: (() -> Void)? = nil
-    ) {
-        self.transcription = transcription
-        self.audioURL = audioURL
-        self.completion = completion
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text(audioURL == nil ? "Local transcription" : "Transcribe")
+            HStack(spacing: 8) {
+                Button {
+                    onBack()
+                } label: {
+                    Label("Recordings", systemImage: "chevron.left")
+                }
+                .buttonStyle(.borderless)
+                .keyboardShortcut(.cancelAction)
+
+                Text("Transcribe")
                     .font(.headline)
                 Spacer()
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
             }
 
-            if let audioURL {
-                Text(audioURL.lastPathComponent)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
+            Text(audioURL.lastPathComponent)
+                .font(.callout.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
 
             Picker("Model", selection: $transcription.selectedModelID) {
                 ForEach(transcription.models) { model in
@@ -527,11 +615,9 @@ struct TranscriptionView: View {
                 .disabled(transcription.isTranscribing)
 
                 HStack {
-                    if audioURL != nil {
-                        Button("Transcribe") { startTranscription() }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(transcription.isTranscribing)
-                    }
+                    Button("Transcribe") { startTranscription() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(transcription.isTranscribing)
                     Spacer()
                     Button("Remove model", role: .destructive) {
                         confirmsRemoval = true
@@ -547,10 +633,10 @@ struct TranscriptionView: View {
                 Text("Download this Whisper model once, then transcribe recordings offline without an API key.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                Button(audioURL == nil ? "Download model" : "Download & Transcribe") {
+                Button("Download & Transcribe") {
                     Task {
                         await transcription.setup()
-                        if transcription.isReady, audioURL != nil {
+                        if transcription.isReady {
                             startTranscription()
                         }
                     }
@@ -559,18 +645,32 @@ struct TranscriptionView: View {
             }
 
             if transcription.isTranscribing {
-                ProgressView("Transcribing…")
-                    .controlSize(.small)
+                VStack(alignment: .leading, spacing: 6) {
+                    ProgressView(value: transcription.transcriptionProgress)
+                    HStack {
+                        Text(transcription.status)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(Int(transcription.transcriptionProgress * 100))%")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Button("Cancel") { transcription.cancelTranscription() }
+                            .disabled(transcription.isCancellingTranscription)
+                    }
+                }
             }
 
-            HStack(alignment: .firstTextBaseline) {
-                Text(transcription.status)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if transcription.lastOutputURL != nil {
-                    Button("Show file") { transcription.revealTranscript() }
-                        .controlSize(.small)
+            if !transcription.isTranscribing {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(transcription.status)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if transcription.lastOutputURL != nil {
+                        Button("Show file") { transcription.revealTranscript() }
+                            .controlSize(.small)
+                    }
                 }
             }
         }
@@ -585,10 +685,8 @@ struct TranscriptionView: View {
     }
 
     private func startTranscription() {
-        guard let audioURL else { return }
         Task {
             await transcription.transcribe(audioURL)
-            completion?()
         }
     }
 }

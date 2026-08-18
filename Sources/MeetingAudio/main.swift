@@ -65,6 +65,7 @@ func activateExistingRecord(waitingUpTo timeout: TimeInterval) -> Bool {
 enum SelfCheckError: Error {
     case silentAudio
     case transcriptionAudio
+    case transcriptionCancellation
     case recordingBrowser
     case recordingName
     case pauseNotTrimmed(String)
@@ -111,6 +112,14 @@ if let index = CommandLine.arguments.firstIndex(of: "--transcription-self-check"
                 fallback: "Recording"
             ) == "Team - Q3- Sync" else {
                 throw SelfCheckError.recordingName
+            }
+            let transcriptionControl = TranscriptionControl()
+            guard !transcriptionControl.isCancelled else {
+                throw SelfCheckError.transcriptionCancellation
+            }
+            transcriptionControl.cancel()
+            guard transcriptionControl.isCancelled else {
+                throw SelfCheckError.transcriptionCancellation
             }
 
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

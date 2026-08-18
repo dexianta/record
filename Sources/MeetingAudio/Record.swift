@@ -1383,15 +1383,22 @@ struct AudioMeterRow: View {
 struct RecordingsView: View {
     @ObservedObject var recorder: MeetingRecorder
     @ObservedObject var transcription: LocalTranscription
-    @Environment(\.dismiss) private var dismiss
+    let onBack: () -> Void
+    let onTranscribe: (URL) -> Void
     @State private var files: [RecordedFile] = []
     @State private var errorMessage: String?
-    @State private var showsTranscriptionSetup = false
-    @State private var selectedTranscriptionURL: URL?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(spacing: 8) {
+                Button {
+                    onBack()
+                } label: {
+                    Label("Record", systemImage: "chevron.left")
+                }
+                .buttonStyle(.borderless)
+                .keyboardShortcut(.cancelAction)
+
                 Text("Recordings")
                     .font(.headline)
                 Spacer()
@@ -1404,8 +1411,6 @@ struct RecordingsView: View {
                 .accessibilityLabel("Refresh files")
 
                 Button("Open in Finder") { recorder.openRecordingsFolder() }
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
             }
 
             Text("Drag an audio row or its blue transcript icon to share the file.")
@@ -1505,8 +1510,21 @@ struct RecordingsView: View {
             }
 
             if transcription.isTranscribing {
-                ProgressView(transcription.status)
-                    .controlSize(.small)
+                VStack(alignment: .leading, spacing: 5) {
+                    ProgressView(value: transcription.transcriptionProgress)
+                    HStack {
+                        Text(transcription.status)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(Int(transcription.transcriptionProgress * 100))%")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Button("Cancel") { transcription.cancelTranscription() }
+                            .controlSize(.small)
+                            .disabled(transcription.isCancellingTranscription)
+                    }
+                }
             } else if transcription.lastOutputURL != nil {
                 Text(transcription.status)
                     .font(.caption)
@@ -1516,12 +1534,8 @@ struct RecordingsView: View {
         .padding(16)
         .frame(width: 520, height: 360)
         .onAppear { reload() }
-        .sheet(isPresented: $showsTranscriptionSetup) {
-            TranscriptionView(
-                transcription: transcription,
-                audioURL: selectedTranscriptionURL,
-                completion: reload
-            )
+        .onChange(of: transcription.isTranscribing) { wasTranscribing, isTranscribing in
+            if wasTranscribing, !isTranscribing { reload() }
         }
     }
 
@@ -1549,17 +1563,50 @@ struct RecordingsView: View {
     }
 
     private func requestTranscription(_ url: URL) {
-        selectedTranscriptionURL = url
-        showsTranscriptionSetup = true
+        onTranscribe(url)
     }
 }
 
 struct ContentView: View {
+    private enum Screen {
+        case recorder
+        case recordings
+        case transcription(URL)
+    }
+
     @ObservedObject var recorder: MeetingRecorder
     @StateObject private var transcription = LocalTranscription()
-    @State private var showsRecordings = false
+    @State private var screen = Screen.recorder
 
     var body: some View {
+        Group {
+            switch screen {
+            case .recorder:
+                recorderView
+            case .recordings:
+                RecordingsView(
+                    recorder: recorder,
+                    transcription: transcription,
+                    onBack: { screen = .recorder },
+                    onTranscribe: { screen = .transcription($0) }
+                )
+            case .transcription(let audioURL):
+                TranscriptionView(
+                    transcription: transcription,
+                    audioURL: audioURL,
+                    onBack: { screen = .recordings }
+                )
+            }
+        }
+        .task {
+            await recorder.reloadSources()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            recorder.refreshSystemAudioPermission()
+        }
+    }
+
+    private var recorderView: some View {
         VStack(alignment: .leading, spacing: 8) {
             if recorder.systemAudioPermissionNeedsRestart {
                 HStack(spacing: 8) {
@@ -1721,7 +1768,7 @@ struct ContentView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 Button {
-                    showsRecordings = true
+                    screen = .recordings
                 } label: {
                     Image(systemName: "folder")
                         .frame(width: 28, height: 28)
@@ -1734,15 +1781,6 @@ struct ContentView: View {
         }
         .padding(12)
         .frame(width: 300)
-        .task {
-            await recorder.reloadSources()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            recorder.refreshSystemAudioPermission()
-        }
-        .sheet(isPresented: $showsRecordings) {
-            RecordingsView(recorder: recorder, transcription: transcription)
-        }
     }
 }
 
