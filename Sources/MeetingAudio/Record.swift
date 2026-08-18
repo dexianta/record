@@ -1649,6 +1649,15 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             recorder.refreshSystemAudioPermission()
         }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: checkForUpdates) {
+                    Image(systemName: "arrow.down.app")
+                }
+                .help("Check for updates")
+                .accessibilityLabel("Check for updates")
+            }
+        }
     }
 
     private var recorderView: some View {
@@ -1822,15 +1831,6 @@ struct ContentView: View {
                 .buttonStyle(.borderless)
                 .help("Open recordings folder")
                 .accessibilityLabel("Open recordings folder")
-
-                Button(action: checkForUpdates) {
-                    Image(systemName: "arrow.down.circle")
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .help("Check for updates")
-                .accessibilityLabel("Check for updates")
             }
         }
         .padding(12)
