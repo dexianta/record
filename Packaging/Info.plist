@@ -26,6 +26,12 @@
     <string>15.0</string>
     <key>LSMultipleInstancesProhibited</key>
     <true/>
+    <key>SUEnableAutomaticChecks</key>
+    <false/>
+    <key>SUFeedURL</key>
+    <string>https://raw.githubusercontent.com/dexianta/record/main/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>XdECQ7vV+XI/LSuPWnGNiOQLUzUzhbMX1hJU8bOQDNc=</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>

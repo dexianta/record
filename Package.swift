@@ -7,6 +7,12 @@ let package = Package(
     products: [
         .executable(name: "Record", targets: ["MeetingAudio"])
     ],
+    dependencies: [
+        .package(
+            url: "https://github.com/sparkle-project/Sparkle",
+            from: "2.9.4"
+        )
+    ],
     targets: [
         .binaryTarget(
             name: "whisper",
@@ -15,7 +21,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "MeetingAudio",
-            dependencies: ["whisper"],
+            dependencies: [
+                "whisper",
+                .product(name: "Sparkle", package: "Sparkle")
+            ],
             linkerSettings: [
                 .unsafeFlags([
                     "-Xlinker", "-rpath",

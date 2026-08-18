@@ -4,6 +4,7 @@ import AVFoundation
 import CoreGraphics
 import CoreMedia
 import ScreenCaptureKit
+import Sparkle
 import SwiftUI
 
 struct AudioSource: Identifiable, Hashable {
@@ -1613,6 +1614,7 @@ struct ContentView: View {
     }
 
     @ObservedObject var recorder: MeetingRecorder
+    let checkForUpdates: () -> Void
     @StateObject private var transcription = LocalTranscription()
     @State private var screen = Screen.recorder
 
@@ -1820,6 +1822,15 @@ struct ContentView: View {
                 .buttonStyle(.borderless)
                 .help("Open recordings folder")
                 .accessibilityLabel("Open recordings folder")
+
+                Button(action: checkForUpdates) {
+                    Image(systemName: "arrow.down.circle")
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .help("Check for updates")
+                .accessibilityLabel("Check for updates")
             }
         }
         .padding(12)
@@ -1830,6 +1841,15 @@ struct ContentView: View {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var recorder: MeetingRecorder?
+    private let updaterController = SPUStandardUpdaterController(
+        startingUpdater: true,
+        updaterDelegate: nil,
+        userDriverDelegate: nil
+    )
+
+    func checkForUpdates() {
+        updaterController.checkForUpdates(nil)
+    }
 
     func applicationShouldHandleReopen(
         _ sender: NSApplication,
@@ -1858,7 +1878,10 @@ struct MeetingAudioApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(recorder: recorder)
+            ContentView(
+                recorder: recorder,
+                checkForUpdates: appDelegate.checkForUpdates
+            )
                 .onAppear { appDelegate.recorder = recorder }
         }
         .windowResizability(.contentSize)
