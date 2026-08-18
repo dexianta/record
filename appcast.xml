@@ -6,6 +6,16 @@
         <description>Updates for Record.</description>
         <language>en</language>
         <item>
+            <title>0.1.1</title>
+            <pubDate>Tue, 18 Aug 2026 14:55:37 +0200</pubDate>
+            <link>https://github.com/dexianta/record</link>
+            <sparkle:version>12</sparkle:version>
+            <sparkle:shortVersionString>0.1.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/dexianta/record/releases/download/v0.1.1/record-0.1.1.zip" length="3485764" type="application/octet-stream" sparkle:edSignature="+qlXu1ygpBilVqnQ1cmPV3GGK21TLHwY4GcQssaMgZf4vAjRfph6QAGSH34hO78mR+hvSXrCiqOX8tuPgS6MCw=="/>
+        </item>
+        <item>
             <title>0.1.0</title>
             <pubDate>Tue, 18 Aug 2026 14:43:54 +0200</pubDate>
             <link>https://github.com/dexianta/record</link>
