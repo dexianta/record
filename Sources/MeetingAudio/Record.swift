@@ -1649,23 +1649,22 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             recorder.refreshSystemAudioPermission()
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: checkForUpdates) {
-                    Image(systemName: "arrow.down.app")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .controlSize(.mini)
-                .help("Check for updates")
-                .accessibilityLabel("Check for updates")
-            }
-        }
     }
 
     private var recorderView: some View {
         VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Spacer()
+                Button(action: checkForUpdates) {
+                    Image(systemName: "arrow.down.app")
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .help("Check for updates")
+                .accessibilityLabel("Check for updates")
+            }
+
             if recorder.systemAudioPermissionNeedsRestart {
                 HStack(spacing: 8) {
                     Label("Permission enabled", systemImage: "checkmark.circle.fill")
@@ -1889,6 +1888,5 @@ struct MeetingAudioApp: App {
                 .onAppear { appDelegate.recorder = recorder }
         }
         .windowResizability(.contentSize)
-        .windowToolbarStyle(.unifiedCompact)
     }
 }
