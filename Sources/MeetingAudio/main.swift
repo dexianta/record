@@ -1,10 +1,71 @@
+import AppKit
 import AVFoundation
 import Darwin
 import Foundation
 
+enum SingleInstanceLockError: Error {
+    case held
+    case system(Int32)
+}
+
+final class SingleInstanceLock {
+    private let descriptor: Int32
+
+    private init(descriptor: Int32) {
+        self.descriptor = descriptor
+    }
+
+    static func acquire(named name: String = "com.local.MeetingAudio.\(getuid()).lock") throws -> SingleInstanceLock {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent(name)
+            .path
+        let descriptor = path.withCString {
+            Darwin.open($0, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        }
+        guard descriptor >= 0 else { throw SingleInstanceLockError.system(errno) }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            let code = errno
+            Darwin.close(descriptor)
+            if code == EWOULDBLOCK { throw SingleInstanceLockError.held }
+            throw SingleInstanceLockError.system(code)
+        }
+        return SingleInstanceLock(descriptor: descriptor)
+    }
+
+    deinit {
+        Darwin.close(descriptor)
+    }
+}
+
+@discardableResult
+func activateExistingRecord(waitingUpTo timeout: TimeInterval) -> Bool {
+    guard let bundleIdentifier = Bundle.main.bundleIdentifier else { return false }
+    let deadline = Date().addingTimeInterval(timeout)
+    var running: NSRunningApplication?
+
+    repeat {
+        running = NSRunningApplication
+            .runningApplications(withBundleIdentifier: bundleIdentifier)
+            .first(where: {
+                $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
+            })
+        if let running, running.isFinishedLaunching {
+            running.activate(options: [.activateAllWindows])
+            return true
+        }
+        guard Date() < deadline else { break }
+        usleep(50_000)
+    } while true
+
+    guard let running else { return false }
+    running.activate(options: [.activateAllWindows])
+    return true
+}
+
 enum SelfCheckError: Error {
     case silentAudio
     case pauseNotTrimmed(String)
+    case singleInstanceLock
     case unexpectedVideo
 }
 
@@ -13,6 +74,16 @@ if CommandLine.arguments.contains("--self-check") {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         do {
+            let lockName = "Record-self-check-\(UUID().uuidString).lock"
+            let lock = try SingleInstanceLock.acquire(named: lockName)
+            do {
+                _ = try SingleInstanceLock.acquire(named: lockName)
+                throw SelfCheckError.singleInstanceLock
+            } catch SingleInstanceLockError.held {
+                // Expected: a second launch cannot acquire the same lock.
+            }
+            withExtendedLifetime(lock) {}
+
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             defer { try? FileManager.default.removeItem(at: directory) }
             let input: URL
@@ -93,7 +164,7 @@ if CommandLine.arguments.contains("--self-check") {
             guard !tracks.isEmpty else { throw RecorderError.noAudioTrack }
             let videoTracks = try await trimmedAsset.loadTracks(withMediaType: .video)
             guard videoTracks.isEmpty else { throw SelfCheckError.unexpectedVideo }
-            print("Audio-only export, pause-trim, and level-meter self-check passed")
+            print("Single-instance, audio-only export, pause-trim, and level-meter self-check passed")
             exit(EXIT_SUCCESS)
         } catch {
             FileHandle.standardError.write(Data("Audio export self-check failed: \(error)\n".utf8))
@@ -102,5 +173,19 @@ if CommandLine.arguments.contains("--self-check") {
     }
     dispatchMain()
 } else {
-    MeetingAudioApp.main()
+    if activateExistingRecord(waitingUpTo: 0) {
+        exit(EXIT_SUCCESS)
+    }
+
+    do {
+        let lock = try SingleInstanceLock.acquire()
+        withExtendedLifetime(lock) {
+            MeetingAudioApp.main()
+        }
+    } catch SingleInstanceLockError.held {
+        activateExistingRecord(waitingUpTo: 2)
+    } catch {
+        FileHandle.standardError.write(Data("Single-instance lock failed: \(error)\n".utf8))
+        MeetingAudioApp.main()
+    }
 }
