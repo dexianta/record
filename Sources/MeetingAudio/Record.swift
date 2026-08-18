@@ -1449,21 +1449,29 @@ struct RecordingsView: View {
 
                             Spacer()
 
-                            if file.transcriptURL == nil {
-                                Button {
-                                    requestTranscription(file.url)
-                                } label: {
-                                    Image(systemName: "text.bubble")
-                                }
-                                .buttonStyle(.borderless)
-                                .disabled(transcription.isTranscribing)
-                                .help(
-                                    transcription.isReady
-                                        ? "Transcribe locally"
-                                        : "Set up local transcription"
+                            Button {
+                                requestTranscription(file.url)
+                            } label: {
+                                Image(
+                                    systemName: file.transcriptURL == nil
+                                        ? "text.bubble"
+                                        : "arrow.triangle.2.circlepath"
                                 )
-                                .accessibilityLabel("Transcribe \(file.url.lastPathComponent)")
                             }
+                            .buttonStyle(.borderless)
+                            .disabled(transcription.isTranscribing)
+                            .help(
+                                file.transcriptURL != nil
+                                    ? "Transcribe again"
+                                    : (transcription.isReady
+                                        ? "Transcribe locally"
+                                        : "Set up local transcription")
+                            )
+                            .accessibilityLabel(
+                                file.transcriptURL == nil
+                                    ? "Transcribe \(file.url.lastPathComponent)"
+                                    : "Transcribe \(file.url.lastPathComponent) again"
+                            )
 
                             Button {
                                 recorder.revealRecordingFile(file.url)
