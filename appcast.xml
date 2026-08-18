@@ -1,9 +1,19 @@
-<?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
         <title>Record Updates</title>
         <link>https://github.com/dexianta/record</link>
         <description>Updates for Record.</description>
         <language>en</language>
+        <item>
+            <title>0.1.0</title>
+            <pubDate>Tue, 18 Aug 2026 14:43:54 +0200</pubDate>
+            <link>https://github.com/dexianta/record</link>
+            <sparkle:version>10</sparkle:version>
+            <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/dexianta/record/releases/download/v0.1.0/record-0.1.0.zip" length="3484380" type="application/octet-stream" sparkle:edSignature="Zi2/YKuwxjT6U8DKj0fdn2/HyUFq5xpYCWH9MbC6ZC/ZGWqz5NDeorVxUYzRndfdOUovOp4ff+8tSeir2dttBg=="/>
+        </item>
     </channel>
 </rss>
