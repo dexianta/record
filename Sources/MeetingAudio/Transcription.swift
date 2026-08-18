@@ -470,8 +470,9 @@ final class LocalTranscription: ObservableObject {
         status = "Local transcription is not set up."
     }
 
-    func transcribe(_ audioURL: URL) async {
-        guard isReady, !isTranscribing else { return }
+    func transcribe(_ audioURL: URL) async -> URL? {
+        guard isReady, !isTranscribing else { return nil }
+        var completedURL: URL?
         let control = TranscriptionControl { [weak self] progress in
             Task { @MainActor [weak self] in
                 self?.transcriptionProgress = progress
@@ -500,6 +501,7 @@ final class LocalTranscription: ObservableObject {
             try transcript.write(to: outputURL, atomically: true, encoding: .utf8)
             transcriptionProgress = 1
             lastOutputURL = outputURL
+            completedURL = outputURL
             status = "Saved \(outputURL.lastPathComponent)"
         } catch is CancellationError {
             status = "Transcription cancelled."
@@ -509,6 +511,7 @@ final class LocalTranscription: ObservableObject {
         transcriptionControl = nil
         isTranscribing = false
         isCancellingTranscription = false
+        return completedURL
     }
 
     func cancelTranscription() {
@@ -568,6 +571,7 @@ struct TranscriptionView: View {
     @ObservedObject var transcription: LocalTranscription
     let audioURL: URL
     let onBack: () -> Void
+    let onFinished: () -> Void
     @State private var confirmsRemoval = false
 
     var body: some View {
@@ -686,7 +690,9 @@ struct TranscriptionView: View {
 
     private func startTranscription() {
         Task {
-            await transcription.transcribe(audioURL)
+            if await transcription.transcribe(audioURL) != nil {
+                onFinished()
+            }
         }
     }
 }

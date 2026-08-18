@@ -1413,7 +1413,7 @@ struct RecordingsView: View {
                 Button("Open in Finder") { recorder.openRecordingsFolder() }
             }
 
-            Text("Drag an audio row or its blue transcript icon to share the file.")
+            Text("Drag an audio row or its blue transcript row to share the file.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -1431,80 +1431,110 @@ struct RecordingsView: View {
                 )
             } else {
                 List(files) { file in
-                    HStack(spacing: 10) {
-                        Image(systemName: iconName(for: file.url))
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(file.url.lastPathComponent)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Text("\(file.modifiedAt.formatted(date: .abbreviated, time: .shortened)) · \(ByteCountFormatter.string(fromByteCount: Int64(file.byteCount), countStyle: .file))")
-                                .font(.caption2)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 10) {
+                            Image(systemName: iconName(for: file.url))
+                                .font(.title3)
                                 .foregroundStyle(.secondary)
+                                .frame(width: 24)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(file.url.lastPathComponent)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Text("\(file.modifiedAt.formatted(date: .abbreviated, time: .shortened)) · \(ByteCountFormatter.string(fromByteCount: Int64(file.byteCount), countStyle: .file))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            if file.transcriptURL == nil {
+                                Button {
+                                    requestTranscription(file.url)
+                                } label: {
+                                    Image(systemName: "text.bubble")
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(transcription.isTranscribing)
+                                .help(
+                                    transcription.isReady
+                                        ? "Transcribe locally"
+                                        : "Set up local transcription"
+                                )
+                                .accessibilityLabel("Transcribe \(file.url.lastPathComponent)")
+                            }
+
+                            Button {
+                                recorder.revealRecordingFile(file.url)
+                            } label: {
+                                Image(systemName: "magnifyingglass")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Show in Finder")
+                            .accessibilityLabel("Show \(file.url.lastPathComponent) in Finder")
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture(count: 2) {
+                            recorder.openRecordingFile(file.url)
+                        }
+                        .onDrag {
+                            itemProvider(for: file.url)
+                        }
+                        .contextMenu {
+                            Button("Open") { recorder.openRecordingFile(file.url) }
+                            if let transcriptURL = file.transcriptURL {
+                                Button("Open transcript") {
+                                    recorder.openRecordingFile(transcriptURL)
+                                }
+                                Button("Transcribe again") { requestTranscription(file.url) }
+                                    .disabled(transcription.isTranscribing)
+                            } else {
+                                Button("Transcribe") { requestTranscription(file.url) }
+                                    .disabled(transcription.isTranscribing)
+                            }
+                            Button("Show in Finder") { recorder.revealRecordingFile(file.url) }
                         }
 
-                        Spacer()
-
                         if let transcriptURL = file.transcriptURL {
-                            Button {
-                                recorder.openRecordingFile(transcriptURL)
-                            } label: {
+                            HStack(spacing: 7) {
                                 Image(systemName: "doc.text.fill")
+                                Text(transcriptURL.lastPathComponent)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Spacer()
+                                Text("Drag")
+                                Image(systemName: "arrow.up.forward.square")
                             }
-                            .buttonStyle(.borderless)
+                            .font(.caption)
                             .foregroundStyle(.blue)
-                            .onDrag { itemProvider(for: transcriptURL) }
-                            .help("Open transcript · drag this icon to share it")
-                            .accessibilityLabel("Open or drag transcript for \(file.url.lastPathComponent)")
-                        } else {
-                            Button {
-                                requestTranscription(file.url)
-                            } label: {
-                                Image(systemName: "text.bubble")
-                            }
-                            .buttonStyle(.borderless)
-                            .disabled(transcription.isTranscribing)
-                            .help(
-                                transcription.isReady
-                                    ? "Transcribe locally"
-                                    : "Set up local transcription"
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color.blue.opacity(0.09))
                             )
-                            .accessibilityLabel("Transcribe \(file.url.lastPathComponent)")
-                        }
-
-                        Button {
-                            recorder.revealRecordingFile(file.url)
-                        } label: {
-                            Image(systemName: "magnifyingglass")
-                        }
-                        .buttonStyle(.borderless)
-                        .help("Show in Finder")
-                        .accessibilityLabel("Show \(file.url.lastPathComponent) in Finder")
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture(count: 2) {
-                        recorder.openRecordingFile(file.url)
-                    }
-                    .onDrag {
-                        itemProvider(for: file.url)
-                    }
-                    .contextMenu {
-                        Button("Open") { recorder.openRecordingFile(file.url) }
-                        if let transcriptURL = file.transcriptURL {
-                            Button("Open transcript") {
+                            .padding(.leading, 34)
+                            .contentShape(Rectangle())
+                            .onTapGesture(count: 2) {
                                 recorder.openRecordingFile(transcriptURL)
                             }
-                            Button("Transcribe again") { requestTranscription(file.url) }
-                                .disabled(transcription.isTranscribing)
-                        } else {
-                            Button("Transcribe") { requestTranscription(file.url) }
-                                .disabled(transcription.isTranscribing)
+                            .onDrag { itemProvider(for: transcriptURL) }
+                            .contextMenu {
+                                Button("Open transcript") {
+                                    recorder.openRecordingFile(transcriptURL)
+                                }
+                                Button("Show in Finder") {
+                                    recorder.revealRecordingFile(transcriptURL)
+                                }
+                                Button("Transcribe again") { requestTranscription(file.url) }
+                                    .disabled(transcription.isTranscribing)
+                            }
+                            .help("Double-click to open or drag this transcript to another app")
+                            .accessibilityLabel("Transcript \(transcriptURL.lastPathComponent), draggable")
                         }
-                        Button("Show in Finder") { recorder.revealRecordingFile(file.url) }
                     }
+                    .padding(.vertical, 2)
                 }
                 .listStyle(.inset)
             }
@@ -1594,7 +1624,12 @@ struct ContentView: View {
                 TranscriptionView(
                     transcription: transcription,
                     audioURL: audioURL,
-                    onBack: { screen = .recordings }
+                    onBack: { screen = .recordings },
+                    onFinished: {
+                        if case .transcription = screen {
+                            screen = .recordings
+                        }
+                    }
                 )
             }
         }
