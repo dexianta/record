@@ -8,7 +8,21 @@ let package = Package(
         .executable(name: "Record", targets: ["MeetingAudio"])
     ],
     targets: [
-        .executableTarget(name: "MeetingAudio")
+        .binaryTarget(
+            name: "whisper",
+            url: "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.6/whisper-v1.8.6-xcframework.zip",
+            checksum: "654f6534b1d109cf1f53c3ac94de14d1aedbc08600bf9743e2b331c1619a863f"
+        ),
+        .executableTarget(
+            name: "MeetingAudio",
+            dependencies: ["whisper"],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "@executable_path/../Frameworks"
+                ])
+            ]
+        )
     ],
     swiftLanguageModes: [.v5]
 )

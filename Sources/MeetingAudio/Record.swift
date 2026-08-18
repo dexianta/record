@@ -18,8 +18,26 @@ struct AudioSource: Identifiable, Hashable {
     let processID: pid_t?
 }
 
+struct RecordedFile: Identifiable {
+    let url: URL
+    let transcriptURL: URL?
+    let modifiedAt: Date
+    let byteCount: Int
+
+    var id: URL { url }
+}
+
+func sidecarTranscriptURL(for audioURL: URL) -> URL {
+    audioURL.deletingPathExtension().appendingPathExtension("txt")
+}
+
+private let transcribableAudioExtensions: Set<String> = [
+    "m4a", "mp4", "mp3", "wav", "aiff", "aif", "flac"
+]
+
 enum RecorderError: LocalizedError {
     case microphoneDenied
+    case systemAudioDenied
     case noDisplay
     case appNoLongerRunning(String)
     case noAudioTrack
@@ -34,6 +52,8 @@ enum RecorderError: LocalizedError {
         switch self {
         case .microphoneDenied:
             return "Microphone access is required. Enable it in System Settings → Privacy & Security → Microphone."
+        case .systemAudioDenied:
+            return "System Audio Recording access is required. Allow it, then quit and reopen Record."
         case .noDisplay:
             return "No display is available for system-audio capture."
         case .appNoLongerRunning(let name):
@@ -778,6 +798,9 @@ final class MeetingRecorder: ObservableObject {
     @Published private(set) var meetingWaveform = [Float](repeating: 0, count: 40)
     @Published private(set) var microphoneWaveform = [Float](repeating: 0, count: 40)
     @Published private(set) var isMeteringAvailable = true
+    @Published private(set) var hasSystemAudioPermission = CGPreflightScreenCaptureAccess()
+    @Published private(set) var systemAudioPermissionNeedsRestart = false
+    @Published var recordingName = ""
 
     private var session: RecordingSession?
     private var timer: Timer?
@@ -791,8 +814,21 @@ final class MeetingRecorder: ObservableObject {
         String(format: "%02d:%02d", elapsedSeconds / 60, elapsedSeconds % 60)
     }
 
+    var systemAudioPermissionHint: String {
+        if Bundle.main.object(forInfoDictionaryKey: "RecordAdHocSigned") as? Bool == true {
+            return "Allow access. If Record is already enabled, remove its old row first."
+        }
+        return "System audio access is required."
+    }
+
     func reloadSources() async {
         guard !isRecording, !isBusy else { return }
+        guard hasSystemAudioPermission, !systemAudioPermissionNeedsRestart else {
+            status = systemAudioPermissionNeedsRestart
+                ? "Permission enabled. Quit and reopen Record."
+                : "Allow System Audio Recording to get started."
+            return
+        }
         do {
             let content = try await shareableContent()
             let ownPID = ProcessInfo.processInfo.processIdentifier
@@ -830,6 +866,10 @@ final class MeetingRecorder: ObservableObject {
         var newSession: RecordingSession?
         var started = false
         do {
+            guard CGPreflightScreenCaptureAccess() else {
+                hasSystemAudioPermission = false
+                throw RecorderError.systemAudioDenied
+            }
             guard await requestMicrophoneAccess() else {
                 throw RecorderError.microphoneDenied
             }
@@ -866,6 +906,7 @@ final class MeetingRecorder: ObservableObject {
             }
 
             let urls = try makeRecordingURLs(sourceName: source.name)
+            recordingName = urls.final.deletingPathExtension().lastPathComponent
             newSession = try RecordingSession(
                 filter: filter,
                 stagingURL: urls.staging,
@@ -925,7 +966,12 @@ final class MeetingRecorder: ObservableObject {
 
         do {
             let outputURL = try await currentSession.stopAndExport()
-            status = "Saved \(outputURL.lastPathComponent)"
+            do {
+                let namedURL = try applyRecordingName(to: outputURL)
+                status = "Saved \(namedURL.lastPathComponent)"
+            } catch {
+                status = "Saved \(outputURL.lastPathComponent), but could not apply the name: \(error.localizedDescription)"
+            }
         } catch {
             if !currentSession.canSafelyRelease {
                 stopNeedsRetry = true
@@ -987,6 +1033,90 @@ final class MeetingRecorder: ObservableObject {
         }
     }
 
+    func recordedFiles(in directory: URL? = nil) throws -> [RecordedFile] {
+        let keys: Set<URLResourceKey> = [
+            .isRegularFileKey,
+            .contentModificationDateKey,
+            .fileSizeKey
+        ]
+        return try FileManager.default.contentsOfDirectory(
+            at: try directory ?? recordingsDirectory(),
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles]
+        )
+        .compactMap { url in
+            guard let values = try? url.resourceValues(forKeys: keys),
+                  values.isRegularFile == true,
+                  transcribableAudioExtensions.contains(url.pathExtension.lowercased()) else {
+                return nil
+            }
+            let transcriptURL = sidecarTranscriptURL(for: url)
+            let legacyTranscriptURL = url.deletingLastPathComponent()
+                .appendingPathComponent(
+                    url.deletingPathExtension().lastPathComponent + " transcript"
+                )
+                .appendingPathExtension("txt")
+            return RecordedFile(
+                url: url,
+                transcriptURL: FileManager.default.fileExists(atPath: transcriptURL.path)
+                    ? transcriptURL
+                    : (FileManager.default.fileExists(atPath: legacyTranscriptURL.path)
+                        ? legacyTranscriptURL
+                        : nil),
+                modifiedAt: values.contentModificationDate ?? .distantPast,
+                byteCount: values.fileSize ?? 0
+            )
+        }
+        .sorted { $0.modifiedAt > $1.modifiedAt }
+    }
+
+    func openRecordingFile(_ url: URL) {
+        if !NSWorkspace.shared.open(url) {
+            status = "Could not open \(url.lastPathComponent)."
+        }
+    }
+
+    func revealRecordingFile(_ url: URL) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    func requestSystemAudioPermission() {
+        guard !isRecording, !isBusy else { return }
+        let granted = CGRequestScreenCaptureAccess() || CGPreflightScreenCaptureAccess()
+        hasSystemAudioPermission = granted
+        if granted {
+            systemAudioPermissionNeedsRestart = true
+            status = "Permission enabled. Quit and reopen Record."
+        } else {
+            status = "Allow Record in System Settings, then quit and reopen it."
+            openSystemAudioSettings()
+        }
+    }
+
+    func refreshSystemAudioPermission() {
+        let granted = CGPreflightScreenCaptureAccess()
+        if !hasSystemAudioPermission, granted {
+            systemAudioPermissionNeedsRestart = true
+            status = "Permission enabled. Quit and reopen Record."
+        } else if hasSystemAudioPermission, !granted {
+            systemAudioPermissionNeedsRestart = false
+            status = "System Audio Recording permission was turned off."
+        }
+        hasSystemAudioPermission = granted
+    }
+
+    func openSystemAudioSettings() {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+        ) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func quitAfterPermissionChange() {
+        guard !isRecording, !isBusy else { return }
+        NSApp.terminate(nil)
+    }
+
     private func handleUnexpectedFailure(_ error: Error) async {
         guard let currentSession = session else { return }
         if isBusy {
@@ -1011,7 +1141,8 @@ final class MeetingRecorder: ObservableObject {
             return
         }
         if let recoveredURL {
-            status = "Recording stopped: \(error.localizedDescription) Saved \(recoveredURL.lastPathComponent)."
+            let namedURL = (try? applyRecordingName(to: recoveredURL)) ?? recoveredURL
+            status = "Recording stopped: \(error.localizedDescription) Saved \(namedURL.lastPathComponent)."
         } else if currentSession.recoveryURL != nil {
             status = "Recording stopped: \(error.localizedDescription) Recovery files were kept."
         } else {
@@ -1125,6 +1256,49 @@ final class MeetingRecorder: ObservableObject {
         }
         return (stagingURL, finalURL)
     }
+
+    nonisolated static func sanitizedRecordingName(
+        _ proposedName: String,
+        fallback: String
+    ) -> String {
+        var name = proposedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.lowercased().hasSuffix(".m4a") {
+            name.removeLast(4)
+        }
+        let invalidCharacters = CharacterSet.controlCharacters
+            .union(CharacterSet(charactersIn: "/:"))
+        name = name.unicodeScalars.map {
+            invalidCharacters.contains($0) ? "-" : String($0)
+        }.joined()
+        name = name.trimmingCharacters(
+            in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "."))
+        )
+        name = String(name.prefix(120))
+        return name.isEmpty ? fallback : name
+    }
+
+    private func applyRecordingName(to outputURL: URL) throws -> URL {
+        let fallback = outputURL.deletingPathExtension().lastPathComponent
+        let baseName = Self.sanitizedRecordingName(recordingName, fallback: fallback)
+        let directory = outputURL.deletingLastPathComponent()
+        var destination = directory
+            .appendingPathComponent(baseName)
+            .appendingPathExtension("m4a")
+        if destination.standardizedFileURL == outputURL.standardizedFileURL {
+            return outputURL
+        }
+
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: destination.path) {
+            destination = directory
+                .appendingPathComponent("\(baseName) \(suffix)")
+                .appendingPathExtension("m4a")
+            suffix += 1
+        }
+        try FileManager.default.moveItem(at: outputURL, to: destination)
+        recordingName = destination.deletingPathExtension().lastPathComponent
+        return destination
+    }
 }
 
 struct WaveformView: View {
@@ -1206,11 +1380,214 @@ struct AudioMeterRow: View {
     }
 }
 
+struct RecordingsView: View {
+    @ObservedObject var recorder: MeetingRecorder
+    @ObservedObject var transcription: LocalTranscription
+    @Environment(\.dismiss) private var dismiss
+    @State private var files: [RecordedFile] = []
+    @State private var errorMessage: String?
+    @State private var showsTranscriptionSetup = false
+    @State private var selectedTranscriptionURL: URL?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Recordings")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    reload()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Refresh files")
+                .accessibilityLabel("Refresh files")
+
+                Button("Open in Finder") { recorder.openRecordingsFolder() }
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+
+            Text("Drag an audio row or its blue transcript icon to share the file.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if let errorMessage {
+                ContentUnavailableView(
+                    "Could not load recordings",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(errorMessage)
+                )
+            } else if files.isEmpty {
+                ContentUnavailableView(
+                    "No recordings yet",
+                    systemImage: "waveform",
+                    description: Text("Your recordings and transcripts will appear here.")
+                )
+            } else {
+                List(files) { file in
+                    HStack(spacing: 10) {
+                        Image(systemName: iconName(for: file.url))
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(file.url.lastPathComponent)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Text("\(file.modifiedAt.formatted(date: .abbreviated, time: .shortened)) · \(ByteCountFormatter.string(fromByteCount: Int64(file.byteCount), countStyle: .file))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        if let transcriptURL = file.transcriptURL {
+                            Button {
+                                recorder.openRecordingFile(transcriptURL)
+                            } label: {
+                                Image(systemName: "doc.text.fill")
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.blue)
+                            .onDrag { itemProvider(for: transcriptURL) }
+                            .help("Open transcript · drag this icon to share it")
+                            .accessibilityLabel("Open or drag transcript for \(file.url.lastPathComponent)")
+                        } else {
+                            Button {
+                                requestTranscription(file.url)
+                            } label: {
+                                Image(systemName: "text.bubble")
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(transcription.isTranscribing)
+                            .help(
+                                transcription.isReady
+                                    ? "Transcribe locally"
+                                    : "Set up local transcription"
+                            )
+                            .accessibilityLabel("Transcribe \(file.url.lastPathComponent)")
+                        }
+
+                        Button {
+                            recorder.revealRecordingFile(file.url)
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Show in Finder")
+                        .accessibilityLabel("Show \(file.url.lastPathComponent) in Finder")
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) {
+                        recorder.openRecordingFile(file.url)
+                    }
+                    .onDrag {
+                        itemProvider(for: file.url)
+                    }
+                    .contextMenu {
+                        Button("Open") { recorder.openRecordingFile(file.url) }
+                        if let transcriptURL = file.transcriptURL {
+                            Button("Open transcript") {
+                                recorder.openRecordingFile(transcriptURL)
+                            }
+                            Button("Transcribe again") { requestTranscription(file.url) }
+                                .disabled(transcription.isTranscribing)
+                        } else {
+                            Button("Transcribe") { requestTranscription(file.url) }
+                                .disabled(transcription.isTranscribing)
+                        }
+                        Button("Show in Finder") { recorder.revealRecordingFile(file.url) }
+                    }
+                }
+                .listStyle(.inset)
+            }
+
+            if transcription.isTranscribing {
+                ProgressView(transcription.status)
+                    .controlSize(.small)
+            } else if transcription.lastOutputURL != nil {
+                Text(transcription.status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .frame(width: 520, height: 360)
+        .onAppear { reload() }
+        .sheet(isPresented: $showsTranscriptionSetup) {
+            TranscriptionView(
+                transcription: transcription,
+                audioURL: selectedTranscriptionURL,
+                completion: reload
+            )
+        }
+    }
+
+    private func reload() {
+        do {
+            files = try recorder.recordedFiles()
+            errorMessage = nil
+        } catch {
+            files = []
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func iconName(for url: URL) -> String {
+        switch url.pathExtension.lowercased() {
+        case "mp4":
+            return "lifepreserver"
+        default:
+            return "waveform"
+        }
+    }
+
+    private func itemProvider(for url: URL) -> NSItemProvider {
+        NSItemProvider(contentsOf: url) ?? NSItemProvider(object: url as NSURL)
+    }
+
+    private func requestTranscription(_ url: URL) {
+        selectedTranscriptionURL = url
+        showsTranscriptionSetup = true
+    }
+}
+
 struct ContentView: View {
     @ObservedObject var recorder: MeetingRecorder
+    @StateObject private var transcription = LocalTranscription()
+    @State private var showsRecordings = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if recorder.systemAudioPermissionNeedsRestart {
+                HStack(spacing: 8) {
+                    Label("Permission enabled", systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                    Spacer()
+                    Button("Quit Record") { recorder.quitAfterPermissionChange() }
+                        .controlSize(.small)
+                }
+            } else if !recorder.hasSystemAudioPermission {
+                HStack(spacing: 8) {
+                    Text(recorder.systemAudioPermissionHint)
+                        .font(.caption)
+                    Spacer()
+                    Button("Allow") { recorder.requestSystemAudioPermission() }
+                        .controlSize(.small)
+                    Button {
+                        recorder.openSystemAudioSettings()
+                    } label: {
+                        Image(systemName: "gear")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Open System Settings")
+                    .accessibilityLabel("Open System Settings")
+                }
+            }
+
             VStack(spacing: 8) {
                 AudioMeterRow(
                     label: "Audio",
@@ -1243,7 +1620,12 @@ struct ContentView: View {
                         ? "Record all system audio"
                         : "Records all audio from this app; browser tabs cannot be separated"
                 )
-                .disabled(recorder.isRecording || recorder.isBusy)
+                .disabled(
+                    recorder.isRecording
+                        || recorder.isBusy
+                        || !recorder.hasSystemAudioPermission
+                        || recorder.systemAudioPermissionNeedsRestart
+                )
 
                 Button {
                     Task { await recorder.reloadSources() }
@@ -1252,10 +1634,25 @@ struct ContentView: View {
                 }
                 .help("Refresh running apps")
                 .accessibilityLabel("Refresh audio sources")
-                .disabled(recorder.isRecording || recorder.isBusy)
+                .disabled(
+                    recorder.isRecording
+                        || recorder.isBusy
+                        || !recorder.hasSystemAudioPermission
+                        || recorder.systemAudioPermissionNeedsRestart
+                )
             }
 
             if recorder.isRecording {
+                HStack(spacing: 6) {
+                    Label("Name", systemImage: "pencil")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("Recording name", text: $recorder.recordingName)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(recorder.isBusy)
+                        .accessibilityLabel("Recording name")
+                }
+
                 HStack(spacing: 8) {
                     Text(recorder.elapsedText)
                         .font(.system(.callout, design: .monospaced).weight(.medium))
@@ -1280,7 +1677,6 @@ struct ContentView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(recorder.isBusy || recorder.stopNeedsRetry)
-                    .keyboardShortcut(.space, modifiers: [])
 
                     Button {
                         Task { await recorder.stop() }
@@ -1305,7 +1701,11 @@ struct ContentView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .disabled(recorder.isBusy)
+                    .disabled(
+                        recorder.isBusy
+                            || !recorder.hasSystemAudioPermission
+                            || recorder.systemAudioPermissionNeedsRestart
+                    )
                     .keyboardShortcut(.space, modifiers: [])
                     .help("Start recording")
                     .accessibilityLabel("Record")
@@ -1321,7 +1721,7 @@ struct ContentView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 Button {
-                    recorder.openRecordingsFolder()
+                    showsRecordings = true
                 } label: {
                     Image(systemName: "folder")
                         .frame(width: 28, height: 28)
@@ -1336,6 +1736,12 @@ struct ContentView: View {
         .frame(width: 300)
         .task {
             await recorder.reloadSources()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            recorder.refreshSystemAudioPermission()
+        }
+        .sheet(isPresented: $showsRecordings) {
+            RecordingsView(recorder: recorder, transcription: transcription)
         }
     }
 }

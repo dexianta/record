@@ -19,6 +19,8 @@ Selecting Chrome records all Chrome audio; macOS cannot isolate a single browser
 
 Recordings are saved as M4A audio files, with paused gaps removed and no video track. The format works directly for transcription.
 
+Click the transcription button to download a local Whisper model and transcribe the latest recording or another audio file. The default quantized Turbo model is 574 MB; the optional full Turbo model is 1.62 GB. Models are downloaded only when requested, transcription runs offline, and no Python, Homebrew, ffmpeg, API key, or account is required. Plain-text transcripts are saved beside their audio files.
+
 Pause is applied when the final M4A is saved. If export fails, the retained `.recording.mp4` recovery file is the uninterrupted capture and can include audio from paused periods.
 
 ## Build
@@ -30,7 +32,7 @@ swift run Record --self-check
 ./scripts/build-dmg.sh
 ```
 
-The current DMG is Apple Silicon-only and ad-hoc signed for local testing. Public distribution requires a Developer ID certificate and Apple notarization.
+The current DMG is Apple Silicon-only. The build script automatically uses an installed Developer ID or Apple Development certificate; otherwise it falls back to ad-hoc signing. Rebuilt ad-hoc copies lose Screen & System Audio Recording permission because their code identity changes. Public distribution and a stable identity require a Developer ID certificate and Apple notarization.
 
 ## Windows
 

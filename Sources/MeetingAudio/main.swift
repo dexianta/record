@@ -64,12 +64,34 @@ func activateExistingRecord(waitingUpTo timeout: TimeInterval) -> Bool {
 
 enum SelfCheckError: Error {
     case silentAudio
+    case transcriptionAudio
+    case recordingBrowser
+    case recordingName
     case pauseNotTrimmed(String)
     case singleInstanceLock
     case unexpectedVideo
 }
 
-if CommandLine.arguments.contains("--self-check") {
+if let index = CommandLine.arguments.firstIndex(of: "--transcription-self-check"),
+   CommandLine.arguments.indices.contains(index + 2) {
+    let modelURL = URL(fileURLWithPath: CommandLine.arguments[index + 1])
+    let audioURL = URL(fileURLWithPath: CommandLine.arguments[index + 2])
+    Task {
+        do {
+            let transcript = try await LocalWhisper.transcribe(
+                audioURL: audioURL,
+                modelURL: modelURL,
+                language: "auto"
+            )
+            print(transcript, terminator: "")
+            exit(EXIT_SUCCESS)
+        } catch {
+            FileHandle.standardError.write(Data("Transcription self-check failed: \(error)\n".utf8))
+            exit(EXIT_FAILURE)
+        }
+    }
+    dispatchMain()
+} else if CommandLine.arguments.contains("--self-check") {
     Task {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -84,6 +106,13 @@ if CommandLine.arguments.contains("--self-check") {
             }
             withExtendedLifetime(lock) {}
 
+            guard MeetingRecorder.sanitizedRecordingName(
+                "  Team / Q3: Sync.m4a  ",
+                fallback: "Recording"
+            ) == "Team - Q3- Sync" else {
+                throw SelfCheckError.recordingName
+            }
+
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             defer { try? FileManager.default.removeItem(at: directory) }
             let input: URL
@@ -95,6 +124,12 @@ if CommandLine.arguments.contains("--self-check") {
             }
             let output = directory.appendingPathComponent("self-check.m4a")
             try await AudioExporter.export(from: input, to: output)
+            let transcript = sidecarTranscriptURL(for: output)
+            try "Self-check transcript\n".write(
+                to: transcript,
+                atomically: true,
+                encoding: .utf8
+            )
             let baselineAsset = AVURLAsset(url: output)
             let baselineDuration = try await baselineAsset.load(.duration).seconds
             let meterInput = URL(
@@ -113,6 +148,10 @@ if CommandLine.arguments.contains("--self-check") {
             guard let measurement = AudioLevelAnalyzer.measure(buffer),
                   AudioLevelAnalyzer.visualLevel(measurement.rms) > 0 else {
                 throw SelfCheckError.silentAudio
+            }
+            let transcriptionSamples = try await LocalWhisper.pcmSamples(from: input)
+            guard !transcriptionSamples.isEmpty else {
+                throw SelfCheckError.transcriptionAudio
             }
 
             let sourceAsset = AVURLAsset(url: input)
@@ -164,7 +203,18 @@ if CommandLine.arguments.contains("--self-check") {
             guard !tracks.isEmpty else { throw RecorderError.noAudioTrack }
             let videoTracks = try await trimmedAsset.loadTracks(withMediaType: .video)
             guard videoTracks.isEmpty else { throw SelfCheckError.unexpectedVideo }
-            print("Single-instance, audio-only export, pause-trim, and level-meter self-check passed")
+            let browserFiles = try await MainActor.run {
+                try MeetingRecorder().recordedFiles(in: directory)
+            }
+            guard browserFiles.contains(where: {
+                $0.url.lastPathComponent == output.lastPathComponent
+                    && $0.transcriptURL?.lastPathComponent == transcript.lastPathComponent
+            }), browserFiles.contains(where: {
+                $0.url.lastPathComponent == trimmedOutput.lastPathComponent
+            }) else {
+                throw SelfCheckError.recordingBrowser
+            }
+            print("Single-instance, audio-only export, pause-trim, level-meter, transcription-audio, and file-browser self-check passed")
             exit(EXIT_SUCCESS)
         } catch {
             FileHandle.standardError.write(Data("Audio export self-check failed: \(error)\n".utf8))
