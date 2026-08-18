@@ -1653,7 +1653,11 @@ struct ContentView: View {
             ToolbarItem(placement: .primaryAction) {
                 Button(action: checkForUpdates) {
                     Image(systemName: "arrow.down.app")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
+                .buttonStyle(.plain)
+                .controlSize(.mini)
                 .help("Check for updates")
                 .accessibilityLabel("Check for updates")
             }
@@ -1885,5 +1889,6 @@ struct MeetingAudioApp: App {
                 .onAppear { appDelegate.recorder = recorder }
         }
         .windowResizability(.contentSize)
+        .windowToolbarStyle(.unifiedCompact)
     }
 }
