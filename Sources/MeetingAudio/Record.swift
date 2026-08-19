@@ -1653,18 +1653,6 @@ struct ContentView: View {
 
     private var recorderView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Spacer()
-                Button(action: checkForUpdates) {
-                    Image(systemName: "arrow.down.app")
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .help("Check for updates")
-                .accessibilityLabel("Check for updates")
-            }
-
             if recorder.systemAudioPermissionNeedsRestart {
                 HStack(spacing: 8) {
                     Label("Permission enabled", systemImage: "checkmark.circle.fill")
@@ -1834,6 +1822,15 @@ struct ContentView: View {
                 .buttonStyle(.borderless)
                 .help("Open recordings folder")
                 .accessibilityLabel("Open recordings folder")
+
+                Button(action: checkForUpdates) {
+                    Image(systemName: "arrow.down.app")
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .help("Check for updates")
+                .accessibilityLabel("Check for updates")
             }
         }
         .padding(12)
