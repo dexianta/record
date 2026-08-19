@@ -6,6 +6,16 @@
         <description>Updates for Record.</description>
         <language>en</language>
         <item>
+            <title>0.1.4</title>
+            <pubDate>Wed, 19 Aug 2026 10:03:46 +0200</pubDate>
+            <link>https://github.com/dexianta/record</link>
+            <sparkle:version>18</sparkle:version>
+            <sparkle:shortVersionString>0.1.4</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/dexianta/record/releases/download/v0.1.4/record-0.1.4.zip" length="3484373" type="application/octet-stream" sparkle:edSignature="67iacDIl50XCfTdvSL2zLc841DQTk+BCSwtooboOIkkQgzkf5Wj+CCd3/4pq286jNI3kRV5eySnVvBUnVy/qBQ=="/>
+        </item>
+        <item>
             <title>0.1.3</title>
             <pubDate>Tue, 18 Aug 2026 23:39:52 +0200</pubDate>
             <link>https://github.com/dexianta/record</link>
@@ -24,16 +34,6 @@
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/dexianta/record/releases/download/v0.1.2/record-0.1.2.zip" length="3487673" type="application/octet-stream" sparkle:edSignature="ARgii0TtqEnExgRRUgVhnsFGJkvMj/H6zxxdxW1Xu8suvzvxts+OPPYIUfHvwTGUayI4zVH+MAPj/Rfz6KtTBg=="/>
-        </item>
-        <item>
-            <title>0.1.1</title>
-            <pubDate>Tue, 18 Aug 2026 14:55:37 +0200</pubDate>
-            <link>https://github.com/dexianta/record</link>
-            <sparkle:version>12</sparkle:version>
-            <sparkle:shortVersionString>0.1.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/dexianta/record/releases/download/v0.1.1/record-0.1.1.zip" length="3485764" type="application/octet-stream" sparkle:edSignature="+qlXu1ygpBilVqnQ1cmPV3GGK21TLHwY4GcQssaMgZf4vAjRfph6QAGSH34hO78mR+hvSXrCiqOX8tuPgS6MCw=="/>
         </item>
     </channel>
 </rss>
